@@ -1,0 +1,46 @@
+# Fargate worker — full scverse stack (amd64 only, Python 3.11)
+#
+# Pins chosen to match scvi-tools 1.1.2 (March 2024). Loose bounds in the
+# scverse stack otherwise cause pip's resolver to backtrack through 30+
+# versions of orbax-checkpoint/tensorstore/equinox and never converge.
+# These pins lock the JAX ecosystem to the March–May 2024 compatible set.
+
+# Core numerical stack
+numpy==1.26.4
+scipy==1.14.1
+pandas==2.2.2
+matplotlib==3.9.2
+
+# scverse ecosystem (pinned to match scvi-tools 1.1.2 era)
+scanpy==1.10.1
+anndata==0.10.7
+scvi-tools==1.1.2
+squidpy==1.5.0
+celltypist==1.6.3
+pertpy==0.9.4
+scvelo==0.3.2
+
+# JAX stack — locked to March-May 2024 versions that work with scvi-tools 1.1.2
+jax==0.4.26
+jaxlib==0.4.26
+flax==0.8.2
+optax==0.2.2
+orbax-checkpoint==0.5.7
+chex==0.1.86
+
+# PyTorch stack — CPU-only build; scvi-tools supports torch>=1.8
+torch==2.2.2
+torchmetrics==1.3.2
+lightning==2.1.4
+pytorch-lightning==2.1.4
+
+# Transitive pins to keep resolver fast and prefer wheels over sdists
+scikit-misc==0.3.1
+tensorstore==0.1.56
+equinox==0.11.4
+numpyro==0.14.0
+pyro-ppl==1.9.0
+
+# Infrastructure
+boto3==1.34.162
+jinja2==3.1.6

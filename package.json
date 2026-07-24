@@ -1,0 +1,32 @@
+{
+    "name": "agentcore-scverse",
+    "description": "AgentCore scverse Agent — single-cell genomics on AWS",
+    "version": "0.1.0",
+    "license": "MIT-0",
+    "private": true,
+    "bin": {
+        "index": "bin/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "watch": "tsc -w",
+        "test": "jest",
+        "cdk": "npx aws-cdk@2.1033.0"
+    },
+    "devDependencies": {
+        "@types/jest": "^29.5.12",
+        "@types/node": "22.7.9",
+        "aws-cdk": "^2.1033.0",
+        "dotenv": "^17.2.3",
+        "jest": "^29.7.0",
+        "ts-jest": "^29.1.2",
+        "ts-node": "^10.9.2",
+        "typescript": "~5.8.3"
+    },
+    "dependencies": {
+        "@aws-cdk/aws-bedrock-agentcore-alpha": "^2.230.0-alpha.0",
+        "aws-cdk-lib": "^2.230.0",
+        "cdk-nag": "^2.36.48",
+        "constructs": "^10.4.2"
+    }
+}

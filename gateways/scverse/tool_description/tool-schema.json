@@ -1,0 +1,97 @@
+[
+  {
+    "name": "run_scrna_qc",
+    "description": "Run single-cell RNA quality control on an .h5ad dataset. Performs MAD-based outlier detection on total counts, gene counts, and mitochondrial percentage. Generates three QC plots and returns a filtered dataset. Defaults to the pre-staged PBMC3k dataset if no input is provided.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "input_s3_key": {
+          "type": "string",
+          "description": "S3 key for the input .h5ad file. Defaults to pre-staged PBMC3k if omitted."
+        },
+        "mad_counts": { "type": "number", "description": "MAD threshold for total counts. Default 5." },
+        "mad_genes": { "type": "number", "description": "MAD threshold for gene counts. Default 5." },
+        "mad_mt": { "type": "number", "description": "MAD threshold for mitochondrial %. Default 3." },
+        "mt_threshold": { "type": "number", "description": "Hard upper threshold for MT %. Default 8." },
+        "min_cells": { "type": "integer", "description": "Min cells for gene filtering. Default 20." },
+        "species": { "type": "string", "description": "'human' or 'mouse'. Auto-detected if omitted." }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "run_scvi_analysis",
+    "description": "Run scvi-tools single-cell analysis. Validates model selection against data type, checks required parameters, and returns results. Supports: scVI, scANVI, totalVI, PeakVI, MultiVI, DestVI, veloVI. Provide input_s3_key to run live compute on your .h5ad file via ECS Fargate.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "input_s3_key": { "type": "string", "description": "S3 key for the input .h5ad file (e.g. 'datasets/pbmc3k_raw.h5ad'). When provided, runs live compute on Fargate and returns a Job ID." },
+        "model": { "type": "string", "description": "Model: 'scvi', 'scanvi', 'totalvi', 'peakvi', 'multivi', 'destvi', 'velovi'. Default 'scvi'." },
+        "batch_key": { "type": "string", "description": "Column in .obs for batch correction." },
+        "labels_key": { "type": "string", "description": "Column in .obs for cell type labels. Required for scANVI." },
+        "protein_expression": { "type": "boolean", "description": "Whether protein data is available. Required for totalVI." },
+        "spatial_data": { "type": "string", "description": "S3 key for spatial data. Required for DestVI." },
+        "sc_reference": { "type": "string", "description": "S3 key for scRNA reference. Required for DestVI." },
+        "data_type": { "type": "string", "description": "Data modality for compatibility check." },
+        "n_hvgs": { "type": "integer", "description": "Highly variable genes. Default 2000." },
+        "n_latent": { "type": "integer", "description": "Latent dimensions. Default 10." },
+        "max_epochs": { "type": "integer", "description": "Training epochs. Default 50." }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "submit_scverse_job",
+    "description": "Submit a long-running scverse analysis job. The job runs asynchronously on ECS Fargate. Returns a job_id for status tracking.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workflow": { "type": "string", "description": "Workflow type: 'qc', 'integration', 'full_pipeline'." },
+        "input_s3_key": { "type": "string", "description": "S3 key for the input .h5ad file." },
+        "parameters": { "type": "object", "description": "Workflow-specific parameters." },
+        "notification_email": { "type": "string", "description": "Email for SNS notification on completion." }
+      },
+      "required": ["workflow", "input_s3_key"]
+    }
+  },
+  {
+    "name": "check_job_status",
+    "description": "Check the status of a submitted scverse analysis job.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": { "type": "string", "description": "Job ID returned by submit_scverse_job." }
+      },
+      "required": ["job_id"]
+    }
+  },
+  {
+    "name": "get_job_results",
+    "description": "Retrieve output presigned URLs for a completed scverse job.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "job_id": { "type": "string", "description": "Job ID of the completed job." }
+      },
+      "required": ["job_id"]
+    }
+  },
+  {
+    "name": "list_datasets",
+    "description": "List .h5ad datasets available in the storage bucket. Returns file names, sizes, and upload dates. Use this to discover datasets before running analyses.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "prefix_filter": {
+          "type": "string",
+          "description": "Optional prefix to narrow results (e.g., 'spatial/'). Searches under datasets/ by default."
+        },
+        "next_token": {
+          "type": "string",
+          "description": "Pagination token from a previous list_datasets call."
+        }
+      },
+      "required": []
+    }
+  }
+]

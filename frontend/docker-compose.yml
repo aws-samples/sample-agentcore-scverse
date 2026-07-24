@@ -1,0 +1,35 @@
+services:
+  # Thin proxy that translates OpenAI chat completions API
+  # to AgentCore Runtime invoke_agent_runtime calls.
+  #
+  # Auth: the proxy uses the standard AWS credential chain via the
+  # mounted ~/.aws directory (read-only). Configure your credentials
+  # on the host (aws configure, SSO, ada, etc.) before starting.
+  # No credentials are passed as environment variables.
+  agentcore-proxy:
+    build: ./proxy
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - AWS_REGION=us-west-2
+      - AWS_DEFAULT_REGION=us-west-2
+      - AGENTCORE_RUNTIME_ARN=${AGENTCORE_RUNTIME_ARN}
+    volumes:
+      - ~/.aws:/root/.aws:ro
+
+  # Open WebUI pointed at the proxy as an OpenAI-compatible endpoint
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.10.2
+    ports:
+      - "127.0.0.1:3000:8080"
+    environment:
+      - OPENAI_API_BASE_URL=http://agentcore-proxy:8000/v1
+      - OPENAI_API_KEY=not-needed
+      - WEBUI_AUTH=false
+    depends_on:
+      - agentcore-proxy
+    volumes:
+      - open-webui-data:/app/backend/data
+
+volumes:
+  open-webui-data:

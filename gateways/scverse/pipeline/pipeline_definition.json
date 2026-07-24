@@ -1,0 +1,916 @@
+{
+  "Comment": "scverse multi-step pipeline orchestrator",
+  "StartAt": "ParseInput",
+  "TimeoutSeconds": 14400,
+  "States": {
+    "ParseInput": {
+      "Type": "Pass",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "workflow_type.$": "$.workflow_type",
+        "input_s3_key.$": "$.input_s3_key",
+        "storage_bucket.$": "$.storage_bucket",
+        "parameters.$": "$.parameters",
+        "notification_email.$": "$.notification_email",
+        "output_prefix.$": "$.output_prefix"
+      },
+      "Next": "UpdateStatusRunning"
+    },
+    "UpdateStatusRunning": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, current_step_name = :step, start_timestamp = :ts",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "RUNNING"
+          },
+          ":step": {
+            "S": "qc"
+          },
+          ":ts": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunQC"
+    },
+    "RunQC": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ComputeLambdaArn}",
+        "Payload": {
+          "job_id.$": "$.job_id",
+          "workflow_type": "qc",
+          "input_s3_key.$": "$.input_s3_key",
+          "storage_bucket.$": "$.storage_bucket",
+          "parameters.$": "$.parameters",
+          "output_prefix.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+        }
+      },
+      "TimeoutSeconds": 1800,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Payload.output_s3_key",
+        "metrics.$": "$.Payload.metrics"
+      },
+      "ResultPath": "$.qc_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "UpdateAfterQC"
+    },
+    "UpdateAfterQC": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "integration"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunIntegration"
+    },
+    "RunIntegration": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "integration"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.qc_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 3600,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.integration_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "UpdateAfterIntegration"
+    },
+    "UpdateAfterIntegration": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "clustering"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunClustering"
+    },
+    "RunClustering": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "clustering"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.integration_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 1800,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.clustering_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "UpdateAfterClustering"
+    },
+    "UpdateAfterClustering": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "differential_expression"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunDE"
+    },
+    "RunDE": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "differential_expression"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.clustering_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 1800,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.de_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "UpdateAfterDE"
+    },
+    "UpdateAfterDE": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "optional_steps"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "CheckOptionalSteps"
+    },
+    "CheckOptionalSteps": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.parameters.optional_steps",
+          "IsPresent": true,
+          "Next": "CheckSpatial"
+        }
+      ],
+      "Default": "GenerateReport"
+    },
+    "CheckSpatial": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.parameters.optional_steps",
+          "StringMatches": "*spatial*",
+          "Next": "UpdateBeforeSpatial"
+        }
+      ],
+      "Default": "CheckAnnotation"
+    },
+    "UpdateBeforeSpatial": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "spatial"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunSpatial"
+    },
+    "RunSpatial": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "spatial"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.de_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 3600,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.spatial_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "CheckAnnotation"
+    },
+    "CheckAnnotation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.parameters.optional_steps",
+          "StringMatches": "*annotation*",
+          "Next": "UpdateBeforeAnnotation"
+        }
+      ],
+      "Default": "CheckVelocity"
+    },
+    "UpdateBeforeAnnotation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "annotation"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunAnnotation"
+    },
+    "RunAnnotation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "annotation"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.de_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 1800,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.annotation_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "CheckVelocity"
+    },
+    "CheckVelocity": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.parameters.optional_steps",
+          "StringMatches": "*velocity*",
+          "Next": "UpdateBeforeVelocity"
+        }
+      ],
+      "Default": "GenerateReport"
+    },
+    "UpdateBeforeVelocity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET current_step_name = :step",
+        "ExpressionAttributeValues": {
+          ":step": {
+            "S": "velocity"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunVelocity"
+    },
+    "RunVelocity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${EcsTaskDefinitionArn}",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "Subnets": "${SubnetIds}",
+            "SecurityGroups": [
+              "${SecurityGroupId}"
+            ],
+            "AssignPublicIp": "DISABLED"
+          }
+        },
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "scverse-worker",
+              "Environment": [
+                {
+                  "Name": "JOB_ID",
+                  "Value.$": "$.job_id"
+                },
+                {
+                  "Name": "WORKFLOW_TYPE",
+                  "Value": "velocity"
+                },
+                {
+                  "Name": "INPUT_S3_KEY",
+                  "Value.$": "$.de_result.output_s3_key"
+                },
+                {
+                  "Name": "STORAGE_BUCKET",
+                  "Value.$": "$.storage_bucket"
+                },
+                {
+                  "Name": "OUTPUT_PREFIX",
+                  "Value.$": "States.Format('scverse-jobs/{}/intermediate/', $.job_id)"
+                },
+                {
+                  "Name": "PARAMETERS",
+                  "Value.$": "States.JsonToString($.parameters)"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "TimeoutSeconds": 3600,
+      "ResultSelector": {
+        "output_s3_key.$": "$.Output.output_s3_key"
+      },
+      "ResultPath": "$.velocity_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "GenerateReport"
+    },
+    "GenerateReport": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ComputeLambdaArn}",
+        "Payload": {
+          "job_id.$": "$.job_id",
+          "workflow_type": "generate_report",
+          "storage_bucket.$": "$.storage_bucket",
+          "output_prefix.$": "States.Format('scverse-jobs/{}/outputs/', $.job_id)",
+          "parameters.$": "$.parameters"
+        }
+      },
+      "TimeoutSeconds": 900,
+      "ResultSelector": {
+        "report_s3_key.$": "$.Payload.report_s3_key",
+        "output_s3_keys.$": "$.Payload.output_s3_keys"
+      },
+      "ResultPath": "$.report_result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error_info",
+          "Next": "HandleFailure"
+        }
+      ],
+      "Next": "UpdateCompleted"
+    },
+    "UpdateCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, current_step_name = :step, completion_timestamp = :ts, output_s3_keys = :keys",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "COMPLETED"
+          },
+          ":step": {
+            "S": "completed"
+          },
+          ":ts": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":keys": {
+            "L.$": "$.report_result.output_s3_keys"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "SendNotification"
+    },
+    "SendNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SnsTopicArn}",
+        "Subject.$": "States.Format('scverse Job Complete: {}', $.job_id)",
+        "Message.$": "States.Format('Your {} analysis has completed. Job ID: {} Workflow: {} - Ask the agent: Get results for {}', $.workflow_type, $.job_id, $.workflow_type, $.job_id)"
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SNS.SdkClientException",
+            "SNS.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "PipelineSucceeded"
+    },
+    "PipelineSucceeded": {
+      "Type": "Succeed"
+    },
+    "HandleFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "${JobTableName}",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, error_message = :err_msg, error_step = :err_step, completion_timestamp = :ts",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "FAILED"
+          },
+          ":err_msg": {
+            "S.$": "$.error_info.Cause"
+          },
+          ":err_step": {
+            "S.$": "$.error_info.Error"
+          },
+          ":ts": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDB.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "SendFailureNotification"
+    },
+    "SendFailureNotification": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "${SnsTopicArn}",
+        "Subject.$": "States.Format('scverse Job Failed: {}', $.job_id)",
+        "Message.$": "States.Format('Your {} analysis has failed. Job ID: {} Error: {} - Ask the agent: Get results for {} to see any partial outputs.', $.workflow_type, $.job_id, $.error_info.Cause, $.job_id)"
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SNS.SdkClientException",
+            "SNS.ThrottlingException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "PipelineFailed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "PipelineExecutionFailed",
+      "Cause": "Pipeline execution failed. Check job status for details."
+    }
+  }
+}

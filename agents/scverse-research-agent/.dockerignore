@@ -1,0 +1,9 @@
+
+# Auto-generated exclusions
+.venv/
+__pycache__/
+.git/
+.env*
+deploy.py
+.bedrock_agentcore.yaml
+README.md

@@ -1,0 +1,67 @@
+# Compiled TypeScript
+*.d.ts
+*.js
+*.js.map
+!jest.config.js
+
+# Dependencies
+node_modules/
+
+# CDK
+.cdk.staging
+cdk.out/
+cdk.context.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# Data files (large, staged to S3)
+*.h5ad
+!data/sample/*.h5ad
+
+# Build artifacts
+dist/
+build/
+
+# Security - never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+cdk-outputs.json
+.bedrock_agentcore.yaml
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Stray archive of the old gitlab.com remote (local-only, never publish)
+gitlab-com-archive
+
+# Property-based test cache (local only)
+.hypothesis/
+

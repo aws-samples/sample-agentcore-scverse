@@ -1,0 +1,118 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockPermissions",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:Converse",
+        "bedrock:ConverseStream",
+        "bedrock:GetFoundationModel",
+        "bedrock:ListFoundationModels"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECRImageAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": [
+        "arn:aws:ecr:${region}:${account_id}:repository/*"
+      ]
+    },
+    {
+      "Sid": "ECRTokenAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:CreateLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/bedrock-agentcore/runtimes/*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*",
+        "arn:aws:logs:${region}:${account_id}:log-group:*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Resource": "*",
+      "Action": [
+        "cloudwatch:PutMetricData"
+      ]
+    },
+    {
+      "Sid": "OpenTelemetryPermissions",
+      "Effect": "Allow",
+      "Action": [
+        "xray:PutTraceSegments",
+        "xray:PutTelemetryRecords",
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GetAgentAccessToken",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:GetWorkloadAccessToken",
+        "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+        "bedrock-agentcore:GetWorkloadAccessTokenForUserId"
+      ],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:${region}:${account_id}:workload-identity-directory/default",
+        "arn:aws:bedrock-agentcore:${region}:${account_id}:workload-identity-directory/default/workload-identity/${agent_name}-*"
+      ]
+    },
+    {
+      "Sid": "SSMParameterAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter"
+      ],
+      "Resource": [
+        "arn:aws:ssm:${region}:${account_id}:parameter/gateways/*"
+      ]
+    },
+    {
+      "Sid": "CognitoClientAccess",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:InitiateAuth"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AgentCoreMemoryAccess",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:GetMemory",
+        "bedrock-agentcore:ListMemoryEvents",
+        "bedrock-agentcore:PutMemoryEvent",
+        "bedrock-agentcore:ListEvents",
+        "bedrock-agentcore:GetEvent",
+        "bedrock-agentcore:CreateEvent",
+        "bedrock-agentcore:ListSessions"
+      ],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:${region}:${account_id}:memory/*"
+      ]
+    }
+  ]
+}
