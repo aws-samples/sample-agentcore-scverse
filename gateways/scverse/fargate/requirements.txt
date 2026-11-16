@@ -1,6 +1,6 @@
 # Fargate worker — full scverse stack (amd64 only, Python 3.11)
 #
-# Pins chosen to match scvi-tools 1.1.2 (March 2024). Loose bounds in the
+# Pins chosen to match the scvi-tools 1.1.x line (2024). Loose bounds in the
 # scverse stack otherwise cause pip's resolver to backtrack through 30+
 # versions of orbax-checkpoint/tensorstore/equinox and never converge.
 # These pins lock the JAX ecosystem to the March–May 2024 compatible set.
@@ -11,16 +11,18 @@ scipy==1.14.1
 pandas==2.2.2
 matplotlib==3.9.2
 
-# scverse ecosystem (pinned to match scvi-tools 1.1.2 era)
+# scverse ecosystem (pinned to match scvi-tools 1.1.x era)
 scanpy==1.10.1
 anndata==0.10.7
-scvi-tools==1.1.2
+# 1.1.6.post2 is the last 1.1.x patch; unlike 1.1.2 it drops the lightning<2.2
+# cap, which lets lightning move past the CVEs below without leaving 1.1.x.
+scvi-tools==1.1.6.post2
 squidpy==1.5.0
 celltypist==1.6.3
 pertpy==0.9.4
 scvelo==0.3.2
 
-# JAX stack — locked to March-May 2024 versions that work with scvi-tools 1.1.2
+# JAX stack — locked to March-May 2024 versions that work with scvi-tools 1.1.x
 jax==0.4.26
 jaxlib==0.4.26
 flax==0.8.2
@@ -31,8 +33,10 @@ chex==0.1.86
 # PyTorch stack — CPU-only build; scvi-tools supports torch>=1.8
 torch==2.2.2
 torchmetrics==1.3.2
-lightning==2.1.4
-pytorch-lightning==2.1.4
+# 2.6.6 fixes CVE-2024-5980, CVE-2024-5452, CVE-2024-8019, CVE-2024-8020 and
+# CVE-2026-58659. Do not use 2.6.2/2.6.3 (compromised releases, CVE-2026-44484).
+lightning==2.6.6
+pytorch-lightning==2.6.6
 
 # Transitive pins to keep resolver fast and prefer wheels over sdists
 scikit-misc==0.3.1
@@ -40,6 +44,20 @@ tensorstore==0.1.56
 equinox==0.11.4
 numpyro==0.14.0
 pyro-ppl==1.9.0
+# Lightning 2.1.x capped fsspec<2025, which kept the spatial stack on its
+# 2024 set. Without that cap uv picks fsspec/zarr/xarray 2026 and falls back to
+# the empty spatialdata 0.0.1 placeholder, breaking `import squidpy`.
+spatialdata==0.4.0
+# Runtime-only constraints the resolver cannot see. Each one breaks an import
+# in workflows/__init__.py, which loads every workflow, so the worker would
+# fail to start for all job types.
+# pyarrow>=26 needs NumPy 2 at import time but does not declare it (squidpy).
+pyarrow==25.0.1
+# statsmodels 0.15 removed sandbox.stats.multicomp.multipletests (pertpy 0.9.4).
+statsmodels==0.14.6
+# Not pinned here: xarray-schema (spatialdata -> squidpy) imports pkg_resources,
+# which setuptools>=82 removed. The python:3.11-slim base image ships
+# setuptools 79.0.1 and uv keeps it. Any setuptools<82 pin carries open advisories.
 
 # Infrastructure
 boto3==1.34.162
