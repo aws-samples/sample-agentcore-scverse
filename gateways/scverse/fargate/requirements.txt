@@ -1,6 +1,6 @@
 # Fargate worker — full scverse stack (amd64 only, Python 3.11)
 #
-# Pins chosen to match the scvi-tools 1.1.x line (March 2024). Loose bounds in the
+# Pins chosen to match the scvi-tools 1.1.x line (2024). Loose bounds in the
 # scverse stack otherwise cause pip's resolver to backtrack through 30+
 # versions of orbax-checkpoint/tensorstore/equinox and never converge.
 # These pins lock the JAX ecosystem to the March–May 2024 compatible set.
@@ -55,9 +55,9 @@ spatialdata==0.4.0
 pyarrow==25.0.1
 # statsmodels 0.15 removed sandbox.stats.multicomp.multipletests (pertpy 0.9.4).
 statsmodels==0.14.6
-# setuptools>=82 removed pkg_resources, still imported by xarray-schema
-# (spatialdata -> squidpy). Pinned so it no longer depends on the base image.
-setuptools==80.10.2
+# Not pinned here: xarray-schema (spatialdata -> squidpy) imports pkg_resources,
+# which setuptools>=82 removed. The python:3.11-slim base image ships
+# setuptools 79.0.1 and uv keeps it. Any setuptools<82 pin carries open advisories.
 
 # Infrastructure
 boto3==1.34.162
